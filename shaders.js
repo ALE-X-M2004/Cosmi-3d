@@ -487,4 +487,304 @@ window.CosmosShaders = (function () {
         uniform float uTime;
         uniform float uPixelRatio;
 
-       
+        varying vec3 vColor;
+        varying float vSeed;
+        varying float vOpacity;
+
+        vec3 applyQuat(vec3 v, vec4 q) {
+          vec3 t = 2.0 * cross(q.xyz, v);
+          return v + q.w * t + cross(q.xyz, t);
+        }
+
+        void main() {
+          float ang = aDustData.x * uTime;
+          float ca = cos(ang);
+          float sa = sin(ang);
+          vec3 localPos = vec3(
+            position.x * ca - position.z * sa,
+            position.y,
+            position.x * sa + position.z * ca
+          );
+
+          vec3 worldPos = aGalCenter + applyQuat(localPos, aGalQuat);
+          vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
+          float dist = max(-mvPosition.z, 1.0);
+
+          vColor = color;
+          vSeed = aDustData.z;
+          vOpacity = aDustData.w;
+
+          gl_PointSize = clamp(aDustData.y * uPixelRatio * (275.0 / dist), 1.5, 96.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        precision mediump float;
+
+        uniform float uSpecMode;
+        uniform float uDustOpacity;
+
+        varying vec3 vColor;
+        varying float vSeed;
+        varying float vOpacity;
+
+        ${GLSL_NOISE_2D}
+
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5;
+          float r = length(uv);
+          if (r > 0.5) discard;
+
+          // Rotate puff uniquely by vSeed
+          float a = vSeed * 6.28318;
+          float ca = cos(a);
+          float sa = sin(a);
+          vec2 ruv = mat2(ca, -sa, sa, ca) * uv;
+
+          // Organic wispy filament cloud shape
+          float n = fbm2D(ruv * 5.2 + vec2(vSeed * 19.3, vSeed * 7.1));
+          float radial = smoothstep(0.5, 0.08, r);
+          float cloud = radial * smoothstep(0.24, 0.78, n);
+
+          if (cloud < 0.02) discard;
+
+          if (uSpecMode > 2.5) {
+            // Chandra X-Ray: Neutral dust is virtually transparent to X-rays
+            gl_FragColor = vec4(0.06, 0.08, 0.14, cloud * vOpacity * 0.04 * uDustOpacity);
+          } else if (uSpecMode > 1.5) {
+            // JWST MIRI: Thermal PAH dust glows bright amber-gold & magenta skeleton!
+            float ridge = smoothstep(0.32, 0.72, n);
+            vec3 pahCol = mix(vec3(1.0, 0.44, 0.10), vec3(1.0, 0.16, 0.60), fract(vSeed * 3.7 + n * 0.5));
+            gl_FragColor = vec4(pahCol * (0.95 + 0.55 * ridge), cloud * vOpacity * 0.72 * uDustOpacity);
+          } else if (uSpecMode > 0.5) {
+            // JWST NIRCam: Semi-transparent warm infrared dust veil
+            vec3 irCol = vec3(0.42, 0.17, 0.08);
+            gl_FragColor = vec4(irCol, cloud * vOpacity * 0.28 * uDustOpacity);
+          } else {
+            // Optical: True dark carbon-silicate dust lane extinction
+            vec3 darkDust = vColor * (0.14 + 0.12 * n);
+            gl_FragColor = vec4(darkDust, cloud * vOpacity * 0.88 * uDustOpacity);
+          }
+        }
+      `,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending
+    });
+  }
+
+  // =========================================================================
+  // 4. MILKY WAY FERMI (GAMMA) & eROSITA (SOFT X-RAY) BIPOLAR BUBBLES SHADER
+  // =========================================================================
+  function createFermiBubbleMaterial(isErosita) {
+    const innerCol = isErosita ? new THREE.Color(0x18a6ff) : new THREE.Color(0xd946ef);
+    const rimCol = isErosita ? new THREE.Color(0x7dd3fc) : new THREE.Color(0xff52b8);
+
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0.0 },
+        uSpecMode: { value: 0.0 },
+        uColorCore: { value: innerCol },
+        uColorRim: { value: rimCol },
+        uIsErosita: { value: isErosita ? 1.0 : 0.0 }
+      },
+      vertexShader: `
+        varying vec3 vNormalWorld;
+        varying vec3 vWorldPos;
+        varying vec3 vLocalPos;
+
+        void main() {
+          vLocalPos = position;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vNormalWorld = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: `
+        precision mediump float;
+
+        uniform float uTime;
+        uniform float uSpecMode;
+        uniform vec3 uColorCore;
+        uniform vec3 uColorRim;
+        uniform float uIsErosita;
+
+        varying vec3 vNormalWorld;
+        varying vec3 vWorldPos;
+        varying vec3 vLocalPos;
+
+        ${GLSL_NOISE_3D}
+
+        void main() {
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          vec3 N = normalize(vNormalWorld);
+          float fresnel = pow(1.0 - abs(dot(N, V)), uIsErosita > 0.5 ? 2.4 : 1.9);
+
+          // Rising turbulent bipolar outflow filaments
+          float flowSign = vLocalPos.y >= 0.0 ? -1.0 : 1.0;
+          vec3 sampleP = vLocalPos * 0.045 + vec3(0.0, flowSign * uTime * 0.14, 0.0);
+          float n = fbm3D(sampleP);
+
+          // Fade cleanly near Galactic Plane (y = 0)
+          float baseFade = smoothstep(1.5, 16.0, abs(vLocalPos.y));
+
+          // Brightest in Chandra X-Ray / Gamma mode (uSpecMode == 3)
+          float modeGain = (uSpecMode > 2.5) ? 1.45 : (uSpecMode > 1.5 ? 0.28 : 0.24);
+          vec3 col = mix(uColorCore, uColorRim, fresnel * 0.8 + n * 0.35);
+          float alpha = (fresnel * 0.72 + 0.14) * (0.45 + 0.55 * n) * baseFade * modeGain;
+
+          if (alpha < 0.008) discard;
+          gl_FragColor = vec4(col * (0.85 + 0.65 * fresnel), clamp(alpha, 0.0, 0.82));
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending
+    });
+  }
+
+  // =========================================================================
+  // 5. GLARE-FREE PLANCK CMB COSMIC HORIZON DOME (Radius 145,000)
+  // Clamped strictly below UnrealBloomPass threshold (0.82) — ZERO washout!
+  // =========================================================================
+  function createCMBDomeMaterial() {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uOpacity: { value: 0.0 }, // Driven smoothly by camera distance * HUD slider
+        uSpecMode: { value: 0.0 }
+      },
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision mediump float;
+
+        uniform float uOpacity;
+        uniform float uSpecMode;
+
+        varying vec3 vDir;
+
+        ${GLSL_NOISE_3D}
+
+        void main() {
+          if (uOpacity < 0.005) discard;
+
+          // Multi-scale acoustic oscillation anisotropy map (l ~ 20 to 200 look)
+          float n1 = fbm3D(vDir * 6.5);
+          float n2 = fbm3D(vDir * 18.0 + vec3(4.2, -3.1, 7.8));
+          float aniso = clamp(n1 * 0.62 + n2 * 0.38, 0.0, 1.0);
+
+          // Muted deep-space Planck thermal palette (midnight indigo -> dark teal -> muted amber)
+          vec3 coldSpot = vec3(0.02, 0.05, 0.16);
+          vec3 midCool  = vec3(0.04, 0.16, 0.22);
+          vec3 midWarm  = vec3(0.20, 0.16, 0.08);
+          vec3 hotSpot  = vec3(0.32, 0.13, 0.06);
+
+          vec3 col;
+          if (aniso < 0.36) {
+            col = mix(coldSpot, midCool, aniso / 0.36);
+          } else if (aniso < 0.66) {
+            col = mix(midCool, midWarm, (aniso - 0.36) / 0.30);
+          } else {
+            col = mix(midWarm, hotSpot, (aniso - 0.66) / 0.34);
+          }
+
+          // Subtle equatorial cosmic microwave dipole band
+          float band = exp(-abs(vDir.y) * 5.0) * 0.04;
+          col += vec3(band * 0.9, band * 0.6, band * 0.3);
+
+          // Strict luminance clamp <= 0.34 so UnrealBloomPass (threshold 0.82) NEVER blooms the sky!
+          col = min(col, vec3(0.34));
+
+          gl_FragColor = vec4(col, clamp(uOpacity, 0.0, 0.85));
+        }
+      `,
+      side: THREE.BackSide,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending
+    });
+  }
+
+  // =========================================================================
+  // 6. PROCEDURAL CANVAS SPRITE TEXTURES (Zero External Assets)
+  // =========================================================================
+  function createTextures() {
+    // 1. Soft radial star & knot glow
+    const starCanvas = document.createElement('canvas');
+    starCanvas.width = 64;
+    starCanvas.height = 64;
+    const sCtx = starCanvas.getContext('2d');
+    const sGrad = sCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    sGrad.addColorStop(0.0, 'rgba(255,255,255,1.0)');
+    sGrad.addColorStop(0.22, 'rgba(240,248,255,0.88)');
+    sGrad.addColorStop(0.55, 'rgba(140,190,255,0.26)');
+    sGrad.addColorStop(1.0, 'rgba(0,0,0,0.0)');
+    sCtx.fillStyle = sGrad;
+    sCtx.fillRect(0, 0, 64, 64);
+
+    // 2. Soft volumetric nebula & cluster ICM X-ray cloud
+    const nebCanvas = document.createElement('canvas');
+    nebCanvas.width = 128;
+    nebCanvas.height = 128;
+    const nCtx = nebCanvas.getContext('2d');
+    const nGrad = nCtx.createRadialGradient(64, 64, 2, 64, 64, 64);
+    nGrad.addColorStop(0.0, 'rgba(255,255,255,0.62)');
+    nGrad.addColorStop(0.38, 'rgba(210,230,255,0.26)');
+    nGrad.addColorStop(0.74, 'rgba(110,160,255,0.07)');
+    nGrad.addColorStop(1.0, 'rgba(0,0,0,0.0)');
+    nCtx.fillStyle = nGrad;
+    nCtx.fillRect(0, 0, 128, 128);
+
+    // 3. JWST 8-Point Diffraction Spike Sprite
+    const jwstCanvas = document.createElement('canvas');
+    jwstCanvas.width = 128;
+    jwstCanvas.height = 128;
+    const jCtx = jwstCanvas.getContext('2d');
+    const jGrad = jCtx.createRadialGradient(64, 64, 0, 64, 64, 26);
+    jGrad.addColorStop(0.0, 'rgba(255,255,255,1.0)');
+    jGrad.addColorStop(0.35, 'rgba(255,240,215,0.65)');
+    jGrad.addColorStop(1.0, 'rgba(0,0,0,0.0)');
+    jCtx.fillStyle = jGrad;
+    jCtx.fillRect(0, 0, 128, 128);
+
+    jCtx.save();
+    jCtx.translate(64, 64);
+    const spikeAngles = [0, Math.PI / 3, (2 * Math.PI) / 3, Math.PI / 2];
+    spikeAngles.forEach(function (ang, idx) {
+      jCtx.save();
+      jCtx.rotate(ang);
+      const len = idx === 3 ? 34 : 58;
+      const g = jCtx.createLinearGradient(-len, 0, len, 0);
+      g.addColorStop(0.0, 'rgba(255,255,255,0.0)');
+      g.addColorStop(0.5, idx === 3 ? 'rgba(255,235,205,0.55)' : 'rgba(255,250,240,0.92)');
+      g.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+      jCtx.fillStyle = g;
+      jCtx.fillRect(-len, -1.2, len * 2, 2.4);
+      jCtx.restore();
+    });
+    jCtx.restore();
+
+    return {
+      starGlow: new THREE.CanvasTexture(starCanvas),
+      nebulaPuff: new THREE.CanvasTexture(nebCanvas),
+      jwstSpike: new THREE.CanvasTexture(jwstCanvas)
+    };
+  }
+
+  return {
+    createGargantuaMaterial: createGargantuaMaterial,
+    createBatchedStarMaterial: createBatchedStarMaterial,
+    createBatchedDustMaterial: createBatchedDustMaterial,
+    createFermiBubbleMaterial: createFermiBubbleMaterial,
+    createCMBDomeMaterial: createCMBDomeMaterial,
+    createTextures: createTextures
+  };
+})();
