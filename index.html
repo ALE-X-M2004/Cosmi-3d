@@ -1,0 +1,253 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Milky Way, Gargantua Sgr A*, Laniakea & Quipu — 3D HDR Simulation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=1" />
+</head>
+<body>
+  <!-- 3D WebGL Canvas & Floating 3D Labels -->
+  <div id="canvas-container">
+    <div id="labels-container"></div>
+  </div>
+
+  <!-- Top-Right Live GPU Telemetry Bar -->
+  <div id="gpu-bar" class="glass-panel fixed top-3 right-3 z-20 hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl text-[10.5px] mono text-slate-300">
+    <span class="flex items-center gap-1.5">
+      <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+      FPS: <b id="stat-fps" class="text-emerald-300">--</b>
+    </span>
+    <span class="text-slate-600">|</span>
+    <span>Draw Calls: <b id="stat-calls" class="text-blue-300">--</b></span>
+    <span class="text-slate-600">|</span>
+    <span>Galaxies: <b id="stat-galaxies" class="text-purple-300">--</b></span>
+    <span class="text-slate-600">|</span>
+    <span>Stars: <b id="stat-stars" class="text-amber-300">--</b></span>
+  </div>
+
+  <!-- Top-Left Main Control & Telemetry HUD -->
+  <aside id="hud-panel" class="glass-panel fixed top-3 left-3 z-20 w-[340px] max-w-[calc(100vw-24px)] max-h-[calc(100vh-24px)] overflow-y-auto rounded-2xl p-3.5 transition-all duration-300">
+    <!-- Header -->
+    <div class="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-700/60">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+          <h1 class="text-xs font-bold uppercase tracking-wider text-blue-300">Cosmos 3D • HDR GPU</h1>
+        </div>
+        <p class="text-[10.5px] text-slate-400 mt-0.5 leading-snug">
+          Gargantua Sgr A* • 225+ Batched Galaxies • Laniakea &amp; Quipu
+        </p>
+      </div>
+      <button id="collapseHudBtn" title="Toggle HUD Panel" class="text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-600/40 rounded-lg px-2.5 py-1 text-[11px] transition shrink-0">
+        Hide
+      </button>
+    </div>
+
+    <div id="hud-body" class="space-y-3 pt-2.5">
+      <!-- Spectral Observation Modes -->
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+          <span>Spectral Filter Mode</span>
+          <span id="activeSpecBadge" class="mono text-[10px] text-amber-300">Optical HDR</span>
+        </div>
+        <div class="grid grid-cols-4 gap-1">
+          <button data-mode="optical" class="spec-btn active">Optical</button>
+          <button data-mode="nircam" class="spec-btn">NIRCam</button>
+          <button data-mode="miri" class="spec-btn">MIRI</button>
+          <button data-mode="xray" class="spec-btn">X-Ray</button>
+        </div>
+      </div>
+
+      <!-- Camera Telemetry Presets -->
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+          <span>Scale &amp; Camera Presets</span>
+          <span id="activeViewBadge" class="mono text-[10px] text-blue-400 truncate max-w-[145px]">Sgr A* Gargantua</span>
+        </div>
+        <div class="grid grid-cols-2 gap-1.5">
+          <button onclick="focusTarget('sgra', this)" class="preset-btn active">
+            <span class="dot bg-amber-400"></span>Sgr A* Gargantua
+          </button>
+          <button onclick="focusTarget('sstars', this)" class="preset-btn">
+            <span class="dot bg-sky-300"></span>Sgr A* S-Stars
+          </button>
+          <button onclick="focusTarget('sol', this)" class="preset-btn">
+            <span class="dot bg-yellow-300"></span>Solar System
+          </button>
+          <button onclick="focusTarget('milkyway', this)" class="preset-btn">
+            <span class="dot bg-blue-400"></span>Milky Way Disk
+          </button>
+          <button onclick="focusTarget('fermi', this)" class="preset-btn">
+            <span class="dot bg-fuchsia-400"></span>Fermi / eROSITA
+          </button>
+          <button onclick="focusTarget('localgroup', this)" class="preset-btn">
+            <span class="dot bg-purple-400"></span>Local Group 3D
+          </button>
+          <button onclick="focusTarget('clusters', this)" class="preset-btn">
+            <span class="dot bg-cyan-400"></span>Galaxy Clusters
+          </button>
+          <button onclick="focusTarget('laniakea', this)" class="preset-btn">
+            <span class="dot bg-emerald-400"></span>Laniakea Basin
+          </button>
+          <button onclick="focusTarget('quipu', this)" class="preset-btn">
+            <span class="dot bg-rose-400"></span>Quipu Superstr.
+          </button>
+          <button onclick="focusTarget('horizon', this)" class="preset-btn">
+            <span class="dot bg-indigo-400"></span>Cosmic Horizon
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabbed Landmark Directory (Auto-populated from catalog.js) -->
+      <div class="pt-1 border-t border-slate-700/50">
+        <div class="flex items-center gap-1 mb-1.5">
+          <button data-tab="stars" class="dir-tab active">Stars &amp; Neb.</button>
+          <button data-tab="galaxies" class="dir-tab">Galaxies</button>
+          <button data-tab="clusters" class="dir-tab">Clusters</button>
+          <button data-tab="cosmic" class="dir-tab">Superstr.</button>
+        </div>
+        <div id="dir-list" class="flex flex-wrap gap-1 max-h-[96px] overflow-y-auto pr-1"></div>
+      </div>
+
+      <!-- Physics, Gargantua & HDR Sliders -->
+      <div class="pt-1.5 border-t border-slate-700/50 space-y-2">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          Relativistic, HDR &amp; Horizon Controls
+        </div>
+
+        <div class="slider-row">
+          <span>Time Warp (<span class="mono text-blue-300">&omega;</span>)</span>
+          <div class="flex items-center gap-2">
+            <input type="range" id="speedSlider" min="0" max="4" step="0.1" value="1.0" class="w-24" />
+            <span id="speedReadout" class="mono text-[10.5px] text-blue-300 w-9 text-right">1.0x</span>
+          </div>
+        </div>
+
+        <div class="slider-row">
+          <span>Kerr Spin / Beaming</span>
+          <div class="flex items-center gap-2">
+            <input type="range" id="gargantuaSpinSlider" min="0" max="1" step="0.05" value="0.85" class="w-24" />
+            <span id="gargantuaSpinReadout" class="mono text-[10.5px] text-amber-300 w-9 text-right">0.85</span>
+          </div>
+        </div>
+
+        <div class="slider-row">
+          <span>HDR Bloom Strength</span>
+          <div class="flex items-center gap-2">
+            <input type="range" id="bloomSlider" min="0" max="2.0" step="0.05" value="0.85" class="w-24" />
+            <span id="bloomReadout" class="mono text-[10.5px] text-emerald-300 w-9 text-right">0.85</span>
+          </div>
+        </div>
+
+        <div class="slider-row">
+          <span>CMB Horizon Opacity</span>
+          <div class="flex items-center gap-2">
+            <input type="range" id="cmbOpacitySlider" min="0" max="1" step="0.05" value="0.55" class="w-24" />
+            <span id="cmbOpacityReadout" class="mono text-[10.5px] text-indigo-300 w-9 text-right">0.55</span>
+          </div>
+        </div>
+
+        <!-- Layer Toggles -->
+        <div class="grid grid-cols-2 gap-x-2 gap-y-1.5 pt-1 text-[11px] text-slate-300">
+          <label class="toggle-item"><input type="checkbox" id="toggleBloom" checked /><span>HDR Bloom</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleDust" checked /><span>Dust Lanes</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleLabels" checked /><span>3D Labels</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleArms" checked /><span>Spiral Arms</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleOrbits" checked /><span>S-Star &amp; Sol Orbits</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleFermi" checked /><span>Fermi / eROSITA</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleLaniakea" checked /><span>Laniakea Flows</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleQuipu" checked /><span>Quipu Superstr.</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleCMB" checked /><span>Planck CMB Dome</span></label>
+          <label class="toggle-item"><input type="checkbox" id="toggleHaloGrid" /><span>Parsec Grid</span></label>
+        </div>
+      </div>
+
+      <!-- Spectral Legend -->
+      <div class="pt-1.5 border-t border-slate-700/50">
+        <div class="grid grid-cols-5 gap-1 text-[9.5px] text-center mono text-slate-300">
+          <div class="legend-chip"><span style="background:#9bb0ff"></span>O/B</div>
+          <div class="legend-chip"><span style="background:#cad7ff"></span>A/F</div>
+          <div class="legend-chip"><span style="background:#fff4ea"></span>G</div>
+          <div class="legend-chip"><span style="background:#ffd2a1"></span>K</div>
+          <div class="legend-chip"><span style="background:#ff8c52"></span>M</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Bottom-Right Astrophysical Telemetry Inspector Card -->
+  <section id="telemetry-card" class="glass-panel fixed bottom-3 right-3 z-20 w-[320px] max-w-[calc(100vw-24px)] rounded-2xl p-3.5 transition-all duration-300">
+    <div class="flex items-center justify-between border-b border-slate-700/60 pb-2 mb-2">
+      <div class="min-w-0 pr-2">
+        <span id="insp-badge" class="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
+          Kerr SMBH • Gargantua Engine
+        </span>
+        <h2 id="insp-title" class="text-sm font-bold text-white mt-1 truncate">Sagittarius A* (Sgr A*)</h2>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button onclick="focusTarget(window.currentSelectedId)" class="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 border border-blue-400/50 text-blue-200 transition">
+          Center
+        </button>
+        <button id="toggleInspectorBtn" title="Minimize Inspector" class="text-[11px] px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-600/40 text-slate-300 transition">
+          &minus;
+        </button>
+      </div>
+    </div>
+
+    <div id="insp-body">
+      <div class="grid grid-cols-2 gap-1.5 text-[10.5px] mono">
+        <div class="stat-box">
+          <span class="stat-label">Class / Mass</span>
+          <span id="insp-class" class="text-slate-100 font-medium">4.154 &times; 10&#8310; M&#9737;</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Distance / R</span>
+          <span id="insp-radius" class="text-blue-300 font-medium">0.00 kpc (Origin)</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Velocity / z</span>
+          <span id="insp-vel" class="text-emerald-300 font-medium">ISCO &approx; 0.5c</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Cosmic Sector</span>
+          <span id="insp-sector" class="text-purple-300 font-medium">Galactic Core</span>
+        </div>
+      </div>
+      <p id="insp-desc" class="text-[11px] text-slate-300 mt-2 leading-relaxed">
+        Supermassive black hole at the Milky Way's center rendered with curved-spacetime geodesic ray-marching, bending the far side of its swirling accretion disk over and beneath the shadow.
+      </p>
+    </div>
+  </section>
+
+  <!-- Bottom-Left Desktop Hint -->
+  <div class="fixed bottom-3 left-3 z-10 hidden lg:flex items-center gap-2.5 px-3 py-1.5 rounded-xl glass-panel text-[10.5px] text-slate-300 pointer-events-none">
+    <span><b>Drag:</b> Orbit</span>
+    <span>&bull;</span>
+    <span><b>Scroll / Pinch:</b> Zoom</span>
+    <span>&bull;</span>
+    <span><b>Right-Drag:</b> Pan</span>
+    <span>&bull;</span>
+    <span><b>Click Label:</b> Fly To</span>
+  </div>
+
+  <!-- Three.js r128 Core & Post-Processing CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+  <!-- Modular Simulation Scripts (loaded in dependency order) -->
+  <script src="catalog.js?v=1"></script>
+  <script src="shaders.js?v=1"></script>
+  <script src="main.js?v=1"></script>
+</body>
+    </html>
+    
